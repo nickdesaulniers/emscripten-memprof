@@ -1,0 +1,6 @@
+[submodule "opengles2-book"]
+	path = opengles2-book
+	url = git@github.com:nickdesaulniers/opengles2-book.git
+[submodule "samples/opengles2-book"]
+	path = samples/opengles2-book
+	url = git@github.com:nickdesaulniers/opengles2-book.git
