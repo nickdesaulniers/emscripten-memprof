@@ -6,5 +6,9 @@ function mallocProxy (address, size) {
     // Maybe slice(5)
     stackTrace: window.printStackTrace(),
   });
+  outstandingMallocs[address] = {
+    size: size,
+    stackTrace: window.printStackTrace(),
+  };
 };
 
