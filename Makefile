@@ -1,5 +1,6 @@
-src = src/malloc.js src/free.js src/stackAlloc.js src/hooks.js src/node_modules/bytes/index.js
+#src = src/malloc.js src/free.js src/stackAlloc.js src/hooks.js src/node_modules/bytes/index.js
+src = src/malloc.js src/free.js src/epilogue.js
 
 default:
-	watchify $(src) -o memoryprofiler2.js -v -d
+	cat $(src) > memoryprofiler3.js
 
