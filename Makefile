@@ -1,4 +1,4 @@
-src = src/malloc.js src/free.js src/epilogue.js
+src = src/memprof.js src/epilogue.js
 
 default:
 	cat $(src) > memoryprofiler3.js

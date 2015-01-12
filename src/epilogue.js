@@ -1,10 +1,14 @@
 var lib = {
-  // Key value pairs where the keys are addresses, value is a pair of size and
-  // stack trace.
-  $outstandingMallocs: {},
-  emscripten_trace_record_allocation: mallocProxy,
-  emscripten_trace_record_free: freeProxy,
+  $memProf: new MemProf,
+  // Seemingly can't use bind here, possible emscripten bug?
+  emscripten_trace_record_allocation: function (address, size) {
+    memProf.mallocProxy(address, size);
+  },
+  emscripten_trace_record_free: function (address) {
+    memProf.freeProxy(address);
+  },
 };
 
-autoAddDeps(lib, '$outstandingMallocs');
+// The identifier `memProf` becomes a global identifier.
+autoAddDeps(lib, '$memProf');
 mergeInto(LibraryManager.library, lib);
