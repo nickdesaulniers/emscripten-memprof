@@ -6,8 +6,6 @@ function MemProf () {
   this.canvas = null;
 };
 
-MemProf.prototype = {};
-
 MemProf.prototype.mallocProxy = function mallocProxy (address, size) {
   if (!this.uiConstructed) {
     this.constructUI();
@@ -51,4 +49,6 @@ MemProf.prototype.constructUI = function constructUI () {
   });
   this.canvas = canvas;
 };
+
+module.exports = new MemProf;
 
