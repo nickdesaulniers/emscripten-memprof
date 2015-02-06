@@ -1,4 +1,3 @@
-// emcc test.c -o test.html --tracing --js-library ../memoryprofiler3.js --shell-file ../memory_profiler_shell.html
 #include <stdlib.h>
 
 void g () {
