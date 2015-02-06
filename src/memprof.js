@@ -96,6 +96,7 @@ MemProf.prototype.updateUI = function () {
 
   this.ctx.fillStyle = '#70FF70';
   this.fillLine(DYNAMIC_BASE, DYNAMICTOP);
+  //console.log(Module.stackTrace());
 };
 
 var memProf = new MemProf;

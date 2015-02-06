@@ -25,7 +25,7 @@ Module.expectedDataFileDownloads++;
                               Module['locateFile'](REMOTE_PACKAGE_BASE) :
                               ((Module['filePackagePrefixURL'] || '') + REMOTE_PACKAGE_BASE);
     var REMOTE_PACKAGE_SIZE = 49170;
-    var PACKAGE_UUID = '388eed8a-bccb-44d3-a087-e4022442f203';
+    var PACKAGE_UUID = '09584f61-aa16-4835-a937-f366ced063fd';
   
     function fetchRemotePackage(packageName, packageSize, callback, errback) {
       var xhr = new XMLHttpRequest();
@@ -161,6 +161,622 @@ Module['FS_createPath']('/Chapter_13', 'ParticleSystem', true, true);
   }
 
 })();
+
+// Domain Public by Eric Wendelin http://www.eriwen.com/ (2008)
+//                  Luke Smith http://lucassmith.name/ (2008)
+//                  Loic Dachary <loic@dachary.org> (2008)
+//                  Johan Euphrosine <proppy@aminche.com> (2008)
+//                  Oyvind Sean Kinsey http://kinsey.no/blog (2010)
+//                  Victor Homyakov <victor-homyakov@users.sourceforge.net> (2010)
+/*global module, exports, define, ActiveXObject*/
+(function(global, factory) {
+    if (typeof exports === 'object') {
+        // Node
+        module.exports = factory();
+    } else if (typeof define === 'function' && define.amd) {
+        // AMD
+        define(factory);
+    } else {
+        // Browser globals
+        global.printStackTrace = factory();
+    }
+}(this, function() {
+    /**
+     * Main function giving a function stack trace with a forced or passed in Error
+     *
+     * @cfg {Error} e The error to create a stacktrace from (optional)
+     * @cfg {Boolean} guess If we should try to resolve the names of anonymous functions
+     * @return {Array} of Strings with functions, lines, files, and arguments where possible
+     */
+    function printStackTrace(options) {
+        options = options || {guess: true};
+        var ex = options.e || null, guess = !!options.guess, mode = options.mode || null;
+        var p = new printStackTrace.implementation(), result = p.run(ex, mode);
+        return (guess) ? p.guessAnonymousFunctions(result) : result;
+    }
+
+    printStackTrace.implementation = function() {
+    };
+
+    printStackTrace.implementation.prototype = {
+        /**
+         * @param {Error} [ex] The error to create a stacktrace from (optional)
+         * @param {String} [mode] Forced mode (optional, mostly for unit tests)
+         */
+        run: function(ex, mode) {
+            ex = ex || this.createException();
+            mode = mode || this.mode(ex);
+            if (mode === 'other') {
+                return this.other(arguments.callee);
+            } else {
+                return this[mode](ex);
+            }
+        },
+
+        createException: function() {
+            try {
+                this.undef();
+            } catch (e) {
+                return e;
+            }
+        },
+
+        /**
+         * Mode could differ for different exception, e.g.
+         * exceptions in Chrome may or may not have arguments or stack.
+         *
+         * @return {String} mode of operation for the exception
+         */
+        mode: function(e) {
+            if (typeof window !== 'undefined' && window.navigator.userAgent.indexOf('PhantomJS') > -1) {
+                return 'phantomjs';
+            }
+
+            if (e['arguments'] && e.stack) {
+                return 'chrome';
+            }
+
+            if (e.stack && e.sourceURL) {
+                return 'safari';
+            }
+
+            if (e.stack && e.number) {
+                return 'ie';
+            }
+
+            if (e.stack && e.fileName) {
+                return 'firefox';
+            }
+
+            if (e.message && e['opera#sourceloc']) {
+                // e.message.indexOf("Backtrace:") > -1 -> opera9
+                // 'opera#sourceloc' in e -> opera9, opera10a
+                // !e.stacktrace -> opera9
+                if (!e.stacktrace) {
+                    return 'opera9'; // use e.message
+                }
+                if (e.message.indexOf('\n') > -1 && e.message.split('\n').length > e.stacktrace.split('\n').length) {
+                    // e.message may have more stack entries than e.stacktrace
+                    return 'opera9'; // use e.message
+                }
+                return 'opera10a'; // use e.stacktrace
+            }
+
+            if (e.message && e.stack && e.stacktrace) {
+                // e.stacktrace && e.stack -> opera10b
+                if (e.stacktrace.indexOf("called from line") < 0) {
+                    return 'opera10b'; // use e.stacktrace, format differs from 'opera10a'
+                }
+                // e.stacktrace && e.stack -> opera11
+                return 'opera11'; // use e.stacktrace, format differs from 'opera10a', 'opera10b'
+            }
+
+            if (e.stack && !e.fileName) {
+                // Chrome 27 does not have e.arguments as earlier versions,
+                // but still does not have e.fileName as Firefox
+                return 'chrome';
+            }
+
+            return 'other';
+        },
+
+        /**
+         * Given a context, function name, and callback function, overwrite it so that it calls
+         * printStackTrace() first with a callback and then runs the rest of the body.
+         *
+         * @param {Object} context of execution (e.g. window)
+         * @param {String} functionName to instrument
+         * @param {Function} callback function to call with a stack trace on invocation
+         */
+        instrumentFunction: function(context, functionName, callback) {
+            context = context || window;
+            var original = context[functionName];
+            context[functionName] = function instrumented() {
+                callback.call(this, printStackTrace().slice(4));
+                return context[functionName]._instrumented.apply(this, arguments);
+            };
+            context[functionName]._instrumented = original;
+        },
+
+        /**
+         * Given a context and function name of a function that has been
+         * instrumented, revert the function to it's original (non-instrumented)
+         * state.
+         *
+         * @param {Object} context of execution (e.g. window)
+         * @param {String} functionName to de-instrument
+         */
+        deinstrumentFunction: function(context, functionName) {
+            if (context[functionName].constructor === Function &&
+                context[functionName]._instrumented &&
+                context[functionName]._instrumented.constructor === Function) {
+                context[functionName] = context[functionName]._instrumented;
+            }
+        },
+
+        /**
+         * Given an Error object, return a formatted Array based on Chrome's stack string.
+         *
+         * @param e - Error object to inspect
+         * @return Array<String> of function calls, files and line numbers
+         */
+        chrome: function(e) {
+            return (e.stack + '\n')
+                .replace(/^[\s\S]+?\s+at\s+/, ' at ') // remove message
+                .replace(/^\s+(at eval )?at\s+/gm, '') // remove 'at' and indentation
+                .replace(/^([^\(]+?)([\n$])/gm, '{anonymous}() ($1)$2')
+                .replace(/^Object.<anonymous>\s*\(([^\)]+)\)/gm, '{anonymous}() ($1)')
+                .replace(/^(.+) \((.+)\)$/gm, '$1@$2')
+                .split('\n')
+                .slice(0, -1);
+        },
+
+        /**
+         * Given an Error object, return a formatted Array based on Safari's stack string.
+         *
+         * @param e - Error object to inspect
+         * @return Array<String> of function calls, files and line numbers
+         */
+        safari: function(e) {
+            return e.stack.replace(/\[native code\]\n/m, '')
+                .replace(/^(?=\w+Error\:).*$\n/m, '')
+                .replace(/^@/gm, '{anonymous}()@')
+                .split('\n');
+        },
+
+        /**
+         * Given an Error object, return a formatted Array based on IE's stack string.
+         *
+         * @param e - Error object to inspect
+         * @return Array<String> of function calls, files and line numbers
+         */
+        ie: function(e) {
+            return e.stack
+                .replace(/^\s*at\s+(.*)$/gm, '$1')
+                .replace(/^Anonymous function\s+/gm, '{anonymous}() ')
+                .replace(/^(.+)\s+\((.+)\)$/gm, '$1@$2')
+                .split('\n')
+                .slice(1);
+        },
+
+        /**
+         * Given an Error object, return a formatted Array based on Firefox's stack string.
+         *
+         * @param e - Error object to inspect
+         * @return Array<String> of function calls, files and line numbers
+         */
+        firefox: function(e) {
+            return e.stack.replace(/(?:\n@:0)?\s+$/m, '')
+                .replace(/^(?:\((\S*)\))?@/gm, '{anonymous}($1)@')
+                .split('\n');
+        },
+
+        opera11: function(e) {
+            var ANON = '{anonymous}', lineRE = /^.*line (\d+), column (\d+)(?: in (.+))? in (\S+):$/;
+            var lines = e.stacktrace.split('\n'), result = [];
+
+            for (var i = 0, len = lines.length; i < len; i += 2) {
+                var match = lineRE.exec(lines[i]);
+                if (match) {
+                    var location = match[4] + ':' + match[1] + ':' + match[2];
+                    var fnName = match[3] || "global code";
+                    fnName = fnName.replace(/<anonymous function: (\S+)>/, "$1").replace(/<anonymous function>/, ANON);
+                    result.push(fnName + '@' + location + ' -- ' + lines[i + 1].replace(/^\s+/, ''));
+                }
+            }
+
+            return result;
+        },
+
+        opera10b: function(e) {
+            // "<anonymous function: run>([arguments not available])@file://localhost/G:/js/stacktrace.js:27\n" +
+            // "printStackTrace([arguments not available])@file://localhost/G:/js/stacktrace.js:18\n" +
+            // "@file://localhost/G:/js/test/functional/testcase1.html:15"
+            var lineRE = /^(.*)@(.+):(\d+)$/;
+            var lines = e.stacktrace.split('\n'), result = [];
+
+            for (var i = 0, len = lines.length; i < len; i++) {
+                var match = lineRE.exec(lines[i]);
+                if (match) {
+                    var fnName = match[1] ? (match[1] + '()') : "global code";
+                    result.push(fnName + '@' + match[2] + ':' + match[3]);
+                }
+            }
+
+            return result;
+        },
+
+        /**
+         * Given an Error object, return a formatted Array based on Opera 10's stacktrace string.
+         *
+         * @param e - Error object to inspect
+         * @return Array<String> of function calls, files and line numbers
+         */
+        opera10a: function(e) {
+            // "  Line 27 of linked script file://localhost/G:/js/stacktrace.js\n"
+            // "  Line 11 of inline#1 script in file://localhost/G:/js/test/functional/testcase1.html: In function foo\n"
+            var ANON = '{anonymous}', lineRE = /Line (\d+).*script (?:in )?(\S+)(?:: In function (\S+))?$/i;
+            var lines = e.stacktrace.split('\n'), result = [];
+
+            for (var i = 0, len = lines.length; i < len; i += 2) {
+                var match = lineRE.exec(lines[i]);
+                if (match) {
+                    var fnName = match[3] || ANON;
+                    result.push(fnName + '()@' + match[2] + ':' + match[1] + ' -- ' + lines[i + 1].replace(/^\s+/, ''));
+                }
+            }
+
+            return result;
+        },
+
+        // Opera 7.x-9.2x only!
+        opera9: function(e) {
+            // "  Line 43 of linked script file://localhost/G:/js/stacktrace.js\n"
+            // "  Line 7 of inline#1 script in file://localhost/G:/js/test/functional/testcase1.html\n"
+            var ANON = '{anonymous}', lineRE = /Line (\d+).*script (?:in )?(\S+)/i;
+            var lines = e.message.split('\n'), result = [];
+
+            for (var i = 2, len = lines.length; i < len; i += 2) {
+                var match = lineRE.exec(lines[i]);
+                if (match) {
+                    result.push(ANON + '()@' + match[2] + ':' + match[1] + ' -- ' + lines[i + 1].replace(/^\s+/, ''));
+                }
+            }
+
+            return result;
+        },
+
+        phantomjs: function(e) {
+            var ANON = '{anonymous}', lineRE = /(\S+) \((\S+)\)/i;
+            var lines = e.stack.split('\n'), result = [];
+
+            for (var i = 1, len = lines.length; i < len; i++) {
+                lines[i] = lines[i].replace(/^\s+at\s+/gm, '');
+                var match = lineRE.exec(lines[i]);
+                if (match) {
+                    result.push(match[1] + '()@' + match[2]);
+                }
+                else {
+                    result.push(ANON + '()@' + lines[i]);
+                }
+            }
+
+            return result;
+        },
+
+        // Safari 5-, IE 9-, and others
+        other: function(curr) {
+            var ANON = '{anonymous}', fnRE = /function(?:\s+([\w$]+))?\s*\(/, stack = [], fn, args, maxStackSize = 10;
+            var slice = Array.prototype.slice;
+            while (curr && stack.length < maxStackSize) {
+                fn = fnRE.test(curr.toString()) ? RegExp.$1 || ANON : ANON;
+                try {
+                    args = slice.call(curr['arguments'] || []);
+                } catch (e) {
+                    args = ['Cannot access arguments: ' + e];
+                }
+                stack[stack.length] = fn + '(' + this.stringifyArguments(args) + ')';
+                try {
+                    curr = curr.caller;
+                } catch (e) {
+                    stack[stack.length] = 'Cannot access caller: ' + e;
+                    break;
+                }
+            }
+            return stack;
+        },
+
+        /**
+         * Given arguments array as a String, substituting type names for non-string types.
+         *
+         * @param {Arguments,Array} args
+         * @return {String} stringified arguments
+         */
+        stringifyArguments: function(args) {
+            var result = [];
+            var slice = Array.prototype.slice;
+            for (var i = 0; i < args.length; ++i) {
+                var arg = args[i];
+                if (arg === undefined) {
+                    result[i] = 'undefined';
+                } else if (arg === null) {
+                    result[i] = 'null';
+                } else if (arg.constructor) {
+                    // TODO constructor comparison does not work for iframes
+                    if (arg.constructor === Array) {
+                        if (arg.length < 3) {
+                            result[i] = '[' + this.stringifyArguments(arg) + ']';
+                        } else {
+                            result[i] = '[' + this.stringifyArguments(slice.call(arg, 0, 1)) + '...' + this.stringifyArguments(slice.call(arg, -1)) + ']';
+                        }
+                    } else if (arg.constructor === Object) {
+                        result[i] = '#object';
+                    } else if (arg.constructor === Function) {
+                        result[i] = '#function';
+                    } else if (arg.constructor === String) {
+                        result[i] = '"' + arg + '"';
+                    } else if (arg.constructor === Number) {
+                        result[i] = arg;
+                    } else {
+                        result[i] = '?';
+                    }
+                }
+            }
+            return result.join(',');
+        },
+
+        sourceCache: {},
+
+        /**
+         * @return {String} the text from a given URL
+         */
+        ajax: function(url) {
+            var req = this.createXMLHTTPObject();
+            if (req) {
+                try {
+                    req.open('GET', url, false);
+                    //req.overrideMimeType('text/plain');
+                    //req.overrideMimeType('text/javascript');
+                    req.send(null);
+                    //return req.status == 200 ? req.responseText : '';
+                    return req.responseText;
+                } catch (e) {
+                }
+            }
+            return '';
+        },
+
+        /**
+         * Try XHR methods in order and store XHR factory.
+         *
+         * @return {XMLHttpRequest} XHR function or equivalent
+         */
+        createXMLHTTPObject: function() {
+            var xmlhttp, XMLHttpFactories = [
+                function() {
+                    return new XMLHttpRequest();
+                }, function() {
+                    return new ActiveXObject('Msxml2.XMLHTTP');
+                }, function() {
+                    return new ActiveXObject('Msxml3.XMLHTTP');
+                }, function() {
+                    return new ActiveXObject('Microsoft.XMLHTTP');
+                }
+            ];
+            for (var i = 0; i < XMLHttpFactories.length; i++) {
+                try {
+                    xmlhttp = XMLHttpFactories[i]();
+                    // Use memoization to cache the factory
+                    this.createXMLHTTPObject = XMLHttpFactories[i];
+                    return xmlhttp;
+                } catch (e) {
+                }
+            }
+        },
+
+        /**
+         * Given a URL, check if it is in the same domain (so we can get the source
+         * via Ajax).
+         *
+         * @param url {String} source url
+         * @return {Boolean} False if we need a cross-domain request
+         */
+        isSameDomain: function(url) {
+            return typeof location !== "undefined" && url.indexOf(location.hostname) !== -1; // location may not be defined, e.g. when running from nodejs.
+        },
+
+        /**
+         * Get source code from given URL if in the same domain.
+         *
+         * @param url {String} JS source URL
+         * @return {Array} Array of source code lines
+         */
+        getSource: function(url) {
+            // TODO reuse source from script tags?
+            if (!(url in this.sourceCache)) {
+                this.sourceCache[url] = this.ajax(url).split('\n');
+            }
+            return this.sourceCache[url];
+        },
+
+        guessAnonymousFunctions: function(stack) {
+            for (var i = 0; i < stack.length; ++i) {
+                var reStack = /\{anonymous\}\(.*\)@(.*)/,
+                    reRef = /^(.*?)(?::(\d+))(?::(\d+))?(?: -- .+)?$/,
+                    frame = stack[i], ref = reStack.exec(frame);
+
+                if (ref) {
+                    var m = reRef.exec(ref[1]);
+                    if (m) { // If falsey, we did not get any file/line information
+                        var file = m[1], lineno = m[2], charno = m[3] || 0;
+                        if (file && this.isSameDomain(file) && lineno) {
+                            var functionName = this.guessAnonymousFunction(file, lineno, charno);
+                            stack[i] = frame.replace('{anonymous}', functionName);
+                        }
+                    }
+                }
+            }
+            return stack;
+        },
+
+        guessAnonymousFunction: function(url, lineNo, charNo) {
+            var ret;
+            try {
+                ret = this.findFunctionName(this.getSource(url), lineNo);
+            } catch (e) {
+                ret = 'getSource failed with url: ' + url + ', exception: ' + e.toString();
+            }
+            return ret;
+        },
+
+        findFunctionName: function(source, lineNo) {
+            // FIXME findFunctionName fails for compressed source
+            // (more than one function on the same line)
+            // function {name}({args}) m[1]=name m[2]=args
+            var reFunctionDeclaration = /function\s+([^(]*?)\s*\(([^)]*)\)/;
+            // {name} = function ({args}) TODO args capture
+            // /['"]?([0-9A-Za-z_]+)['"]?\s*[:=]\s*function(?:[^(]*)/
+            var reFunctionExpression = /['"]?([$_A-Za-z][$_A-Za-z0-9]*)['"]?\s*[:=]\s*function\b/;
+            // {name} = eval()
+            var reFunctionEvaluation = /['"]?([$_A-Za-z][$_A-Za-z0-9]*)['"]?\s*[:=]\s*(?:eval|new Function)\b/;
+            // Walk backwards in the source lines until we find
+            // the line which matches one of the patterns above
+            var code = "", line, maxLines = Math.min(lineNo, 20), m, commentPos;
+            for (var i = 0; i < maxLines; ++i) {
+                // lineNo is 1-based, source[] is 0-based
+                line = source[lineNo - i - 1];
+                commentPos = line.indexOf('//');
+                if (commentPos >= 0) {
+                    line = line.substr(0, commentPos);
+                }
+                // TODO check other types of comments? Commented code may lead to false positive
+                if (line) {
+                    code = line + code;
+                    m = reFunctionExpression.exec(code);
+                    if (m && m[1]) {
+                        return m[1];
+                    }
+                    m = reFunctionDeclaration.exec(code);
+                    if (m && m[1]) {
+                        //return m[1] + "(" + (m[2] || "") + ")";
+                        return m[1];
+                    }
+                    m = reFunctionEvaluation.exec(code);
+                    if (m && m[1]) {
+                        return m[1];
+                    }
+                }
+            }
+            return '(?)';
+        }
+    };
+
+    return printStackTrace;
+}));
+
+function MemProf () {
+   //Key value pairs where the keys are addresses, value is a pair of size and
+  // stack trace.
+  this.outstandingMallocs = {};
+  this.canvas = null;
+  this.totalMemory = null;
+
+  this.constructUI();
+};
+
+MemProf.prototype.mallocProxy = function (address, size) {
+  console.log('malloc', {
+    address: address,
+    size: size,
+    // Maybe slice(5)
+    stackTrace: window.printStackTrace(),
+  });
+  this.outstandingMallocs[address] = {
+    size: size,
+    stackTrace: window.printStackTrace(),
+  };
+  // Instead, we should take a snapshot of memory here and at leats wait until
+  // vsync or less to update UI
+  this.updateUI();
+};
+
+MemProf.prototype.freeProxy = function (address) {
+  // Maybe slice(4)
+  var stackTrace = window.printStackTrace();
+  console.log('free', {
+    address: address,
+    stackTrace: stackTrace,
+  });
+  if (address in this.outstandingMallocs) {
+    delete this.outstandingMallocs[address];
+  } else {
+    throw new Error('free for which there was not a malloc', address,
+      stackTrace);
+  }
+};
+
+MemProf.prototype.constructUI = function () {
+  var canvas = document.createElement('canvas');
+  canvas.width = window.innerWidth * 0.8;
+  canvas.height = window.innerHeight * 0.1;
+  canvas.style.border = '1px solid black';
+  canvas.style.display = 'block';
+  canvas.style.margin = '10vh auto';
+  document.body.appendChild(canvas);
+  this.canvas = canvas;
+  this.ctx = canvas.getContext('2d');
+};
+
+MemProf.prototype.bytesToPixelsRoundDown = function (bytes) {
+  return (bytes * this.canvas.width * this.canvas.height /
+          TOTAL_MEMORY) | 0;
+};
+
+MemProf.prototype.bytesToPixelsRoundUp = function (bytes) {
+  return ((bytes * this.canvas.width * this.canvas.height +
+           TOTAL_MEMORY - 1) / TOTAL_MEMORY) | 0;
+};
+
+MemProf.prototype.fillLine = function (startBytes, endBytes) {
+  var startPixels = this.bytesToPixelsRoundDown(startBytes);
+  var endPixels = this.bytesToPixelsRoundUp(endBytes);
+  //console.log(startPixels, endPixels, startBytes, endBytes);
+  var x0 = (startPixels / this.canvas.height) | 0;
+  var y0 = startPixels - x0 * this.canvas.height;
+  var x1 = (endPixels / this.canvas.height) | 0;
+  var y1 = endPixels - x1 * this.canvas.height;
+
+  if (y0 > 0 && x0 < x1) {
+    this.ctx.fillRect(x0, y0, 1, this.canvas.height - y0);
+    y0 = 0;
+    ++x0;
+  }
+
+  if (y1 < this.canvas.height && x0 < x1) {
+    this.ctx.fillRect(x1, 0, 1, y1);
+    y1 = this.canvas.height - 1;
+    --x1;
+  }
+
+  this.ctx.fillRect(x0, 0, x1 + 1 - x0, this.canvas.height);
+};
+
+MemProf.prototype.updateUI = function () {
+  this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+  this.ctx.fillStyle = 'black';
+  this.fillLine(STATIC_BASE, STATICTOP);
+
+  this.ctx.fillStyle = 'pink';
+  this.fillLine(STACK_BASE, STACK_MAX);
+
+  this.ctx.fillStyle = '#70FF70';
+  this.fillLine(DYNAMIC_BASE, DYNAMICTOP);
+  //console.log(Module.stackTrace());
+};
+
+var memProf = new MemProf;
+
 
 // The Module object: Our interface to the outside world. We import
 // and export values on it, and do the work to get that through
@@ -5708,6 +6324,104 @@ function copyTempDouble(ptr) {
 
   
   
+  function _emscripten_trace_js_configure(collector_url, application) {
+      EmscriptenTrace.configure(collector_url, application);
+    }
+  
+  function _emscripten_trace_js_log_message(channel, message) {
+      if (EmscriptenTrace.enabled) {
+        var now = EmscriptenTrace.now();
+        EmscriptenTrace.post([EmscriptenTrace.EVENT_LOG_MESSAGE, now,
+                              channel, message]);
+      }
+    }
+  
+  function _emscripten_trace_js_enter_context(name) {
+      if (EmscriptenTrace.enabled) {
+        var now = EmscriptenTrace.now();
+        EmscriptenTrace.post([EmscriptenTrace.EVENT_ENTER_CONTEXT,
+                              now, name]);
+      }
+    }
+  
+  function _emscripten_trace_exit_context() {
+      if (EmscriptenTrace.enabled) {
+        var now = EmscriptenTrace.now();
+        EmscriptenTrace.post([EmscriptenTrace.EVENT_EXIT_CONTEXT, now]);
+      }
+    }
+  
+  function _emscripten_get_now() {
+      if (!_emscripten_get_now.actual) {
+        if (ENVIRONMENT_IS_NODE) {
+          _emscripten_get_now.actual = function _emscripten_get_now_actual() {
+            var t = process['hrtime']();
+            return t[0] * 1e3 + t[1] / 1e6;
+          }
+        } else if (typeof dateNow !== 'undefined') {
+          _emscripten_get_now.actual = dateNow;
+        } else if (typeof self === 'object' && self['performance'] && typeof self['performance']['now'] === 'function') {
+          _emscripten_get_now.actual = function _emscripten_get_now_actual() { return self['performance']['now'](); };
+        } else if (typeof performance === 'object' && typeof performance['now'] === 'function') {
+          _emscripten_get_now.actual = function _emscripten_get_now_actual() { return performance['now'](); };
+        } else {
+          _emscripten_get_now.actual = Date.now;
+        }
+      }
+      return _emscripten_get_now.actual();
+    }var EmscriptenTrace={configured:false,testing:false,worker:null,enabled:false,DATA_VERSION:1,EVENT_ALLOCATE:"allocate",EVENT_ANNOTATE_TYPE:"annotate-type",EVENT_APPLICATION_NAME:"application-name",EVENT_ASSOCIATE_STORAGE_SIZE:"associate-storage-size",EVENT_ENTER_CONTEXT:"enter-context",EVENT_EXIT_CONTEXT:"exit-context",EVENT_FRAME_END:"frame-end",EVENT_FRAME_RATE:"frame-rate",EVENT_FRAME_START:"frame-start",EVENT_FREE:"free",EVENT_LOG_MESSAGE:"log-message",EVENT_MEMORY_LAYOUT:"memory-layout",EVENT_OFF_HEAP:"off-heap",EVENT_REALLOCATE:"reallocate",EVENT_REPORT_ERROR:"report-error",EVENT_SESSION_NAME:"session-name",EVENT_TASK_ASSOCIATE_DATA:"task-associate-data",EVENT_TASK_END:"task-end",EVENT_TASK_RESUME:"task-resume",EVENT_TASK_START:"task-start",EVENT_TASK_SUSPEND:"task-suspend",EVENT_USER_NAME:"user-name",init:function () {
+        Module['emscripten_trace_configure'] = _emscripten_trace_js_configure;
+        Module['emscripten_trace_log_message'] = _emscripten_trace_js_log_message;
+        Module['emscripten_trace_enter_context'] = _emscripten_trace_js_enter_context;
+        Module['emscripten_trace_exit_context'] = _emscripten_trace_exit_context;
+      },loadWorkerViaXHR:function (url, ready, scope) {
+        var req = new XMLHttpRequest();
+        req.addEventListener('load', function() {
+          var blob = new Blob([this.responseText], { type: 'text/javascript' });
+          var worker = new Worker(window.URL.createObjectURL(blob));
+          if (ready) {
+            ready.call(scope, worker);
+          }
+        }, req);
+        req.open("get", url, false);
+        req.send();
+      },configure:function (collector_url, application) {
+        EmscriptenTrace.now = _emscripten_get_now;
+        var now = new Date();
+        var session_id = now.getTime().toString() + '_' +
+                            Math.floor((Math.random() * 100) + 1).toString();
+        EmscriptenTrace.loadWorkerViaXHR(collector_url + 'worker.js', function (worker) {
+          EmscriptenTrace.worker = worker;
+          EmscriptenTrace.worker.addEventListener('error', function (e) {
+            console.log('TRACE WORKER ERROR:');
+            console.log(e);
+          }, false);
+          EmscriptenTrace.worker.postMessage({ 'cmd': 'configure',
+                                               'data_version': EmscriptenTrace.DATA_VERSION,
+                                               'session_id': session_id,
+                                               'url': collector_url });
+          EmscriptenTrace.configured = true;
+          EmscriptenTrace.enabled = true;
+        });
+        EmscriptenTrace.post([EmscriptenTrace.EVENT_APPLICATION_NAME, application]);
+        EmscriptenTrace.post([EmscriptenTrace.EVENT_SESSION_NAME, now.toISOString()]);
+      },configureForTest:function () {
+        EmscriptenTrace.testing = true;
+        EmscriptenTrace.enabled = true;
+        EmscriptenTrace.now = function() { return 0.0; };
+      },post:function (entry) {
+        if (EmscriptenTrace.configured && EmscriptenTrace.enabled) {
+          EmscriptenTrace.worker.postMessage({ 'cmd': 'post',
+                                               'entry': entry });
+        } else if (EmscriptenTrace.testing && EmscriptenTrace.enabled) {
+          Module.print('Tracing ' + entry);
+        }
+      }};function _emscripten_trace_record_allocation(address, size) {
+      memProf.mallocProxy(address, size);
+    }
+
+  
+  
   function _eglWaitClient() {
       EGL.setErrorCode(0x3000 /* EGL_SUCCESS */);
       return 1;
@@ -6900,6 +7614,10 @@ function copyTempDouble(ptr) {
    
   Module["_strlen"] = _strlen;
 
+  function _emscripten_trace_record_free(address) {
+      memProf.freeProxy(address);
+    }
+
   function _glEnable(x0) { GLctx.enable(x0) }
 
   function _glUniform4fv(location, count, value) {
@@ -7536,6 +8254,7 @@ Module["requestFullScreen"] = function Module_requestFullScreen(lockPointer, res
   Module["pauseMainLoop"] = function Module_pauseMainLoop() { Browser.mainLoop.pause() };
   Module["resumeMainLoop"] = function Module_resumeMainLoop() { Browser.mainLoop.resume() };
   Module["getUserMedia"] = function Module_getUserMedia() { Browser.getUserMedia() }
+EmscriptenTrace.init()
 __ATINIT__.push({ func: function() { SOCKFS.root = FS.mount(SOCKFS, {}, null); } });
 STACK_BASE = STACKTOP = Runtime.alignMemory(STATICTOP);
 
@@ -7585,7 +8304,7 @@ function invoke_vid(index,a1,a2) {
 }
 
 Module.asmGlobalArg = { "Math": Math, "Int8Array": Int8Array, "Int16Array": Int16Array, "Int32Array": Int32Array, "Uint8Array": Uint8Array, "Uint16Array": Uint16Array, "Uint32Array": Uint32Array, "Float32Array": Float32Array, "Float64Array": Float64Array };
-Module.asmLibraryArg = { "abort": abort, "assert": assert, "min": Math_min, "nullFunc_iiii": nullFunc_iiii, "nullFunc_vi": nullFunc_vi, "nullFunc_vid": nullFunc_vid, "invoke_iiii": invoke_iiii, "invoke_vi": invoke_vi, "invoke_vid": invoke_vid, "_glUseProgram": _glUseProgram, "_fread": _fread, "_glGetShaderiv": _glGetShaderiv, "_glDeleteProgram": _glDeleteProgram, "_XCreateWindow": _XCreateWindow, "_glBindBuffer": _glBindBuffer, "_glGetShaderInfoLog": _glGetShaderInfoLog, "_XInternAtom": _XInternAtom, "_emscripten_set_main_loop_timing": _emscripten_set_main_loop_timing, "_sbrk": _sbrk, "_glBlendFunc": _glBlendFunc, "_glGetAttribLocation": _glGetAttribLocation, "_emscripten_memcpy_big": _emscripten_memcpy_big, "_emscripten_set_main_loop_arg": _emscripten_set_main_loop_arg, "_sysconf": _sysconf, "_close": _close, "_fileno": _fileno, "_write": _write, "_fsync": _fsync, "_glGenBuffers": _glGenBuffers, "_glShaderSource": _glShaderSource, "_XSetWMHints": _XSetWMHints, "_XChangeWindowAttributes": _XChangeWindowAttributes, "_glutCreateWindow": _glutCreateWindow, "_glVertexAttribPointer": _glVertexAttribPointer, "_send": _send, "_glGetProgramInfoLog": _glGetProgramInfoLog, "_glutInitDisplayMode": _glutInitDisplayMode, "_strerror_r": _strerror_r, "_glViewport": _glViewport, "___setErrNo": ___setErrNo, "_glDeleteTextures": _glDeleteTextures, "_glTexImage2D": _glTexImage2D, "_XMapWindow": _XMapWindow, "_printf": _printf, "_glGenTextures": _glGenTextures, "_glEnable": _glEnable, "_eglWaitClient": _eglWaitClient, "_glAttachShader": _glAttachShader, "_glCreateProgram": _glCreateProgram, "_read": _read, "_fwrite": _fwrite, "_time": _time, "_fprintf": _fprintf, "_gettimeofday": _gettimeofday, "_eglCreateWindowSurface": _eglCreateWindowSurface, "_eglGetDisplay": _eglGetDisplay, "_eglChooseConfig": _eglChooseConfig, "_glUniform3fv": _glUniform3fv, "_pwrite": _pwrite, "_open": _open, "_glClearColor": _glClearColor, "_glBindTexture": _glBindTexture, "_glUniform1f": _glUniform1f, "_glUniform1i": _glUniform1i, "_glDrawArrays": _glDrawArrays, "_glCreateShader": _glCreateShader, "_fclose": _fclose, "_glActiveTexture": _glActiveTexture, "_recv": _recv, "_eglMakeCurrent": _eglMakeCurrent, "_glCompileShader": _glCompileShader, "_glEnableVertexAttribArray": _glEnableVertexAttribArray, "_abort": _abort, "_glBufferData": _glBufferData, "_eglSwapBuffers": _eglSwapBuffers, "_fopen": _fopen, "_eglCreateContext": _eglCreateContext, "_XSendEvent": _XSendEvent, "_glDeleteShader": _glDeleteShader, "_glGetProgramiv": _glGetProgramiv, "_eglInitialize": _eglInitialize, "_glLinkProgram": _glLinkProgram, "__reallyNegative": __reallyNegative, "_glGetUniformLocation": _glGetUniformLocation, "_strerror": _strerror, "_glClear": _glClear, "_glUniform4fv": _glUniform4fv, "_XOpenDisplay": _XOpenDisplay, "_pread": _pread, "_mkport": _mkport, "_XStoreName": _XStoreName, "_fflush": _fflush, "_emscripten_set_main_loop": _emscripten_set_main_loop, "___errno_location": ___errno_location, "_eglGetConfigs": _eglGetConfigs, "_glTexParameteri": _glTexParameteri, "__formatString": __formatString, "STACKTOP": STACKTOP, "STACK_MAX": STACK_MAX, "tempDoublePtr": tempDoublePtr, "ABORT": ABORT, "cttz_i8": cttz_i8, "ctlz_i8": ctlz_i8, "NaN": NaN, "Infinity": Infinity };
+Module.asmLibraryArg = { "abort": abort, "assert": assert, "min": Math_min, "nullFunc_iiii": nullFunc_iiii, "nullFunc_vi": nullFunc_vi, "nullFunc_vid": nullFunc_vid, "invoke_iiii": invoke_iiii, "invoke_vi": invoke_vi, "invoke_vid": invoke_vid, "_glUseProgram": _glUseProgram, "_fread": _fread, "_emscripten_trace_exit_context": _emscripten_trace_exit_context, "_glGetShaderiv": _glGetShaderiv, "_glDeleteProgram": _glDeleteProgram, "_XCreateWindow": _XCreateWindow, "_glBindBuffer": _glBindBuffer, "_glGetShaderInfoLog": _glGetShaderInfoLog, "_XInternAtom": _XInternAtom, "_emscripten_set_main_loop_timing": _emscripten_set_main_loop_timing, "_sbrk": _sbrk, "_glBlendFunc": _glBlendFunc, "_glGetAttribLocation": _glGetAttribLocation, "_emscripten_memcpy_big": _emscripten_memcpy_big, "_emscripten_set_main_loop_arg": _emscripten_set_main_loop_arg, "_sysconf": _sysconf, "_close": _close, "_fileno": _fileno, "_write": _write, "_fsync": _fsync, "_glGenBuffers": _glGenBuffers, "_glShaderSource": _glShaderSource, "_XSetWMHints": _XSetWMHints, "_XChangeWindowAttributes": _XChangeWindowAttributes, "_glutCreateWindow": _glutCreateWindow, "_glVertexAttribPointer": _glVertexAttribPointer, "_send": _send, "_glGetProgramInfoLog": _glGetProgramInfoLog, "_glutInitDisplayMode": _glutInitDisplayMode, "_strerror_r": _strerror_r, "_glViewport": _glViewport, "___setErrNo": ___setErrNo, "_glDeleteTextures": _glDeleteTextures, "_emscripten_trace_js_enter_context": _emscripten_trace_js_enter_context, "_glTexImage2D": _glTexImage2D, "_XMapWindow": _XMapWindow, "_printf": _printf, "_glGenTextures": _glGenTextures, "_glEnable": _glEnable, "_emscripten_trace_js_configure": _emscripten_trace_js_configure, "_eglWaitClient": _eglWaitClient, "_emscripten_get_now": _emscripten_get_now, "_glAttachShader": _glAttachShader, "_glCreateProgram": _glCreateProgram, "_read": _read, "_fwrite": _fwrite, "_time": _time, "_fprintf": _fprintf, "_gettimeofday": _gettimeofday, "_emscripten_trace_js_log_message": _emscripten_trace_js_log_message, "_eglCreateWindowSurface": _eglCreateWindowSurface, "_eglGetDisplay": _eglGetDisplay, "_eglChooseConfig": _eglChooseConfig, "_glUniform3fv": _glUniform3fv, "_emscripten_trace_record_allocation": _emscripten_trace_record_allocation, "_pwrite": _pwrite, "_open": _open, "_glClearColor": _glClearColor, "_glBindTexture": _glBindTexture, "_glUniform1f": _glUniform1f, "_glUniform1i": _glUniform1i, "_glDrawArrays": _glDrawArrays, "_glCreateShader": _glCreateShader, "_fclose": _fclose, "_glActiveTexture": _glActiveTexture, "_recv": _recv, "_eglMakeCurrent": _eglMakeCurrent, "_glCompileShader": _glCompileShader, "_glEnableVertexAttribArray": _glEnableVertexAttribArray, "_abort": _abort, "_glBufferData": _glBufferData, "_eglSwapBuffers": _eglSwapBuffers, "_fopen": _fopen, "_eglCreateContext": _eglCreateContext, "_XSendEvent": _XSendEvent, "_glDeleteShader": _glDeleteShader, "_glGetProgramiv": _glGetProgramiv, "_emscripten_trace_record_free": _emscripten_trace_record_free, "_eglInitialize": _eglInitialize, "_glLinkProgram": _glLinkProgram, "__reallyNegative": __reallyNegative, "_glGetUniformLocation": _glGetUniformLocation, "_strerror": _strerror, "_glClear": _glClear, "_glUniform4fv": _glUniform4fv, "_XOpenDisplay": _XOpenDisplay, "_pread": _pread, "_mkport": _mkport, "_XStoreName": _XStoreName, "_fflush": _fflush, "_emscripten_set_main_loop": _emscripten_set_main_loop, "___errno_location": ___errno_location, "_eglGetConfigs": _eglGetConfigs, "_glTexParameteri": _glTexParameteri, "__formatString": __formatString, "STACKTOP": STACKTOP, "STACK_MAX": STACK_MAX, "tempDoublePtr": tempDoublePtr, "ABORT": ABORT, "cttz_i8": cttz_i8, "ctlz_i8": ctlz_i8, "NaN": NaN, "Infinity": Infinity };
 // EMSCRIPTEN_START_ASM
 var asm = (function(global, env, buffer) {
   'almost asm';
@@ -7650,6 +8369,7 @@ var asm = (function(global, env, buffer) {
   var invoke_vid=env.invoke_vid;
   var _glUseProgram=env._glUseProgram;
   var _fread=env._fread;
+  var _emscripten_trace_exit_context=env._emscripten_trace_exit_context;
   var _glGetShaderiv=env._glGetShaderiv;
   var _glDeleteProgram=env._glDeleteProgram;
   var _XCreateWindow=env._XCreateWindow;
@@ -7680,12 +8400,15 @@ var asm = (function(global, env, buffer) {
   var _glViewport=env._glViewport;
   var ___setErrNo=env.___setErrNo;
   var _glDeleteTextures=env._glDeleteTextures;
+  var _emscripten_trace_js_enter_context=env._emscripten_trace_js_enter_context;
   var _glTexImage2D=env._glTexImage2D;
   var _XMapWindow=env._XMapWindow;
   var _printf=env._printf;
   var _glGenTextures=env._glGenTextures;
   var _glEnable=env._glEnable;
+  var _emscripten_trace_js_configure=env._emscripten_trace_js_configure;
   var _eglWaitClient=env._eglWaitClient;
+  var _emscripten_get_now=env._emscripten_get_now;
   var _glAttachShader=env._glAttachShader;
   var _glCreateProgram=env._glCreateProgram;
   var _read=env._read;
@@ -7693,10 +8416,12 @@ var asm = (function(global, env, buffer) {
   var _time=env._time;
   var _fprintf=env._fprintf;
   var _gettimeofday=env._gettimeofday;
+  var _emscripten_trace_js_log_message=env._emscripten_trace_js_log_message;
   var _eglCreateWindowSurface=env._eglCreateWindowSurface;
   var _eglGetDisplay=env._eglGetDisplay;
   var _eglChooseConfig=env._eglChooseConfig;
   var _glUniform3fv=env._glUniform3fv;
+  var _emscripten_trace_record_allocation=env._emscripten_trace_record_allocation;
   var _pwrite=env._pwrite;
   var _open=env._open;
   var _glClearColor=env._glClearColor;
@@ -7719,6 +8444,7 @@ var asm = (function(global, env, buffer) {
   var _XSendEvent=env._XSendEvent;
   var _glDeleteShader=env._glDeleteShader;
   var _glGetProgramiv=env._glGetProgramiv;
+  var _emscripten_trace_record_free=env._emscripten_trace_record_free;
   var _eglInitialize=env._eglInitialize;
   var _glLinkProgram=env._glLinkProgram;
   var __reallyNegative=env.__reallyNegative;
@@ -9155,6 +9881,7 @@ function _malloc($bytes) {
     $33 = $32 | 1;
     HEAP32[$31>>2] = $33;
     $mem$0 = $17;
+    _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
     STACKTOP = sp;return ($mem$0|0);
    }
    $34 = HEAP32[((2048 + 8|0))>>2]|0;
@@ -9279,6 +10006,7 @@ function _malloc($bytes) {
      HEAP32[((2048 + 8|0))>>2] = $81;
      HEAP32[((2048 + 20|0))>>2] = $84;
      $mem$0 = $69;
+     _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
      STACKTOP = sp;return ($mem$0|0);
     }
     $106 = HEAP32[((2048 + 4|0))>>2]|0;
@@ -9581,6 +10309,7 @@ function _malloc($bytes) {
      }
      $243 = (($v$0$i) + 8|0);
      $mem$0 = $243;
+     _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
      STACKTOP = sp;return ($mem$0|0);
     }
    } else {
@@ -10157,6 +10886,7 @@ function _malloc($bytes) {
        } while(0);
        $508 = (($v$3$lcssa$i) + 8|0);
        $mem$0 = $508;
+       _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
        STACKTOP = sp;return ($mem$0|0);
       } else {
        $nb$0 = $246;
@@ -10199,6 +10929,7 @@ function _malloc($bytes) {
   }
   $525 = (($512) + 8|0);
   $mem$0 = $525;
+  _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
   STACKTOP = sp;return ($mem$0|0);
  }
  $526 = HEAP32[((2048 + 12|0))>>2]|0;
@@ -10218,6 +10949,7 @@ function _malloc($bytes) {
   HEAP32[$534>>2] = $533;
   $535 = (($529) + 8|0);
   $mem$0 = $535;
+  _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
   STACKTOP = sp;return ($mem$0|0);
  }
  $536 = HEAP32[2520>>2]|0;
@@ -10255,6 +10987,7 @@ function _malloc($bytes) {
  $551 = ($550>>>0)>($nb$0>>>0);
  if (!($551)) {
   $mem$0 = 0;
+  _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
   STACKTOP = sp;return ($mem$0|0);
  }
  $552 = HEAP32[((2048 + 440|0))>>2]|0;
@@ -10267,6 +11000,7 @@ function _malloc($bytes) {
   $or$cond1$i = $556 | $557;
   if ($or$cond1$i) {
    $mem$0 = 0;
+   _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
    STACKTOP = sp;return ($mem$0|0);
   }
  }
@@ -11177,6 +11911,7 @@ function _malloc($bytes) {
       $$sum1819$i$i = $713 | 8;
       $925 = (($tbase$245$i) + ($$sum1819$i$i)|0);
       $mem$0 = $925;
+      _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
       STACKTOP = sp;return ($mem$0|0);
      }
     }
@@ -11475,12 +12210,14 @@ function _malloc($bytes) {
    HEAP32[$1072>>2] = $1071;
    $1073 = (($1067) + 8|0);
    $mem$0 = $1073;
+   _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
    STACKTOP = sp;return ($mem$0|0);
   }
  }
  $1074 = (___errno_location()|0);
  HEAP32[$1074>>2] = 12;
  $mem$0 = 0;
+ _emscripten_trace_record_allocation(($mem$0|0),($bytes|0));
  STACKTOP = sp;return ($mem$0|0);
 }
 function _free($mem) {
@@ -11509,6 +12246,7 @@ function _free($mem) {
  if ($0) {
   STACKTOP = sp;return;
  }
+ _emscripten_trace_record_free(($mem|0));
  $1 = (($mem) + -8|0);
  $2 = HEAP32[((2048 + 16|0))>>2]|0;
  $3 = ($1>>>0)<($2>>>0);
@@ -13033,12 +13771,12 @@ function _printf_core($f,$fmt,$ap,$nl_arg,$nl_type) {
    $1036 = $22;$26 = $23;
   }
   while(1) {
-   if ((($1036<<24>>24) == 0)) {
-    $$lcssa95 = $26;$z$0$lcssa = $26;
-    break;
-   } else if ((($1036<<24>>24) == 37)) {
+   if ((($1036<<24>>24) == 37)) {
     $28 = $26;$z$096 = $26;
     label = 9;
+    break;
+   } else if ((($1036<<24>>24) == 0)) {
+    $$lcssa95 = $26;$z$0$lcssa = $26;
     break;
    }
    $25 = (($26) + 1|0);
@@ -13372,6 +14110,57 @@ function _printf_core($f,$fmt,$ap,$nl_arg,$nl_type) {
     } else {
      do {
       switch ($139|0) {
+      case 18:  {
+       $arglist_current32 = HEAP32[$ap>>2]|0;
+       HEAP32[tempDoublePtr>>2]=HEAP32[$arglist_current32>>2];HEAP32[tempDoublePtr+4>>2]=HEAP32[$arglist_current32+4>>2];$183 = +HEAPF64[tempDoublePtr>>3];
+       $arglist_next33 = (($arglist_current32) + 8|0);
+       HEAP32[$ap>>2] = $arglist_next33;
+       HEAPF64[tempDoublePtr>>3] = $183;$184 = HEAP32[tempDoublePtr>>2]|0;
+       $185 = HEAP32[tempDoublePtr+4>>2]|0;
+       $1038 = $184;$1039 = $185;
+       label = 63;
+       break L65;
+       break;
+      }
+      case 15:  {
+       $arglist_current23 = HEAP32[$ap>>2]|0;
+       $173 = HEAP32[$arglist_current23>>2]|0;
+       $arglist_next24 = (($arglist_current23) + 4|0);
+       HEAP32[$ap>>2] = $arglist_next24;
+       $174 = $173&255;
+       $175 = $174 << 24 >> 24;
+       $176 = ($175|0)<(0);
+       $177 = $176 << 31 >> 31;
+       $sext = $173 << 24;
+       $178 = $sext >> 24;
+       $1040 = $177;$1041 = $178;
+       label = 64;
+       break L65;
+       break;
+      }
+      case 16:  {
+       $arglist_current26 = HEAP32[$ap>>2]|0;
+       $179 = HEAP32[$arglist_current26>>2]|0;
+       $arglist_next27 = (($arglist_current26) + 4|0);
+       HEAP32[$ap>>2] = $arglist_next27;
+       $$mask$i32 = $179 & 255;
+       $1040 = 0;$1041 = $$mask$i32;
+       label = 64;
+       break L65;
+       break;
+      }
+      case 17:  {
+       $arglist_current29 = HEAP32[$ap>>2]|0;
+       HEAP32[tempDoublePtr>>2]=HEAP32[$arglist_current29>>2];HEAP32[tempDoublePtr+4>>2]=HEAP32[$arglist_current29+4>>2];$180 = +HEAPF64[tempDoublePtr>>3];
+       $arglist_next30 = (($arglist_current29) + 8|0);
+       HEAP32[$ap>>2] = $arglist_next30;
+       HEAPF64[tempDoublePtr>>3] = $180;$181 = HEAP32[tempDoublePtr>>2]|0;
+       $182 = HEAP32[tempDoublePtr+4>>2]|0;
+       $1040 = $182;$1041 = $181;
+       label = 64;
+       break L65;
+       break;
+      }
       case 9:  {
        $arglist_current5 = HEAP32[$ap>>2]|0;
        $154 = HEAP32[$arglist_current5>>2]|0;
@@ -13447,57 +14236,6 @@ function _printf_core($f,$fmt,$ap,$nl_arg,$nl_type) {
        break L65;
        break;
       }
-      case 15:  {
-       $arglist_current23 = HEAP32[$ap>>2]|0;
-       $173 = HEAP32[$arglist_current23>>2]|0;
-       $arglist_next24 = (($arglist_current23) + 4|0);
-       HEAP32[$ap>>2] = $arglist_next24;
-       $174 = $173&255;
-       $175 = $174 << 24 >> 24;
-       $176 = ($175|0)<(0);
-       $177 = $176 << 31 >> 31;
-       $sext = $173 << 24;
-       $178 = $sext >> 24;
-       $1040 = $177;$1041 = $178;
-       label = 64;
-       break L65;
-       break;
-      }
-      case 16:  {
-       $arglist_current26 = HEAP32[$ap>>2]|0;
-       $179 = HEAP32[$arglist_current26>>2]|0;
-       $arglist_next27 = (($arglist_current26) + 4|0);
-       HEAP32[$ap>>2] = $arglist_next27;
-       $$mask$i32 = $179 & 255;
-       $1040 = 0;$1041 = $$mask$i32;
-       label = 64;
-       break L65;
-       break;
-      }
-      case 17:  {
-       $arglist_current29 = HEAP32[$ap>>2]|0;
-       HEAP32[tempDoublePtr>>2]=HEAP32[$arglist_current29>>2];HEAP32[tempDoublePtr+4>>2]=HEAP32[$arglist_current29+4>>2];$180 = +HEAPF64[tempDoublePtr>>3];
-       $arglist_next30 = (($arglist_current29) + 8|0);
-       HEAP32[$ap>>2] = $arglist_next30;
-       HEAPF64[tempDoublePtr>>3] = $180;$181 = HEAP32[tempDoublePtr>>2]|0;
-       $182 = HEAP32[tempDoublePtr+4>>2]|0;
-       $1040 = $182;$1041 = $181;
-       label = 64;
-       break L65;
-       break;
-      }
-      case 18:  {
-       $arglist_current32 = HEAP32[$ap>>2]|0;
-       HEAP32[tempDoublePtr>>2]=HEAP32[$arglist_current32>>2];HEAP32[tempDoublePtr+4>>2]=HEAP32[$arglist_current32+4>>2];$183 = +HEAPF64[tempDoublePtr>>3];
-       $arglist_next33 = (($arglist_current32) + 8|0);
-       HEAP32[$ap>>2] = $arglist_next33;
-       HEAPF64[tempDoublePtr>>3] = $183;$184 = HEAP32[tempDoublePtr>>2]|0;
-       $185 = HEAP32[tempDoublePtr+4>>2]|0;
-       $1038 = $184;$1039 = $185;
-       label = 63;
-       break L65;
-       break;
-      }
       default: {
        $1040 = $1035;$1041 = $1034;
        label = 64;
@@ -13536,112 +14274,6 @@ function _printf_core($f,$fmt,$ap,$nl_arg,$nl_type) {
   $fl$1$ = $193 ? $fl$1 : $194;
   L89: do {
    switch ($t$0|0) {
-   case 117:  {
-    $268 = $223;$270 = $196;$pl$0 = 0;$prefix$0 = 3016;
-    label = 86;
-    break;
-   }
-   case 111:  {
-    $243 = ($196|0)==(0);
-    $244 = ($223|0)==(0);
-    $245 = $243 & $244;
-    if ($245) {
-     $$0$lcssa$i45 = $2;
-    } else {
-     $$03$i42 = $2;$247 = $196;$251 = $223;
-     while(1) {
-      $246 = $247 & 7;
-      $248 = $246 | 48;
-      $249 = $248&255;
-      $250 = (($$03$i42) + -1|0);
-      HEAP8[$250>>0] = $249;
-      $252 = (_bitshift64Lshr(($247|0),($251|0),3)|0);
-      $253 = tempRet0;
-      $254 = ($252|0)==(0);
-      $255 = ($253|0)==(0);
-      $256 = $254 & $255;
-      if ($256) {
-       $$0$lcssa$i45 = $250;
-       break;
-      } else {
-       $$03$i42 = $250;$247 = $252;$251 = $253;
-      }
-     }
-    }
-    $257 = $fl$1$ & 8;
-    $258 = ($257|0)==(0);
-    $or$cond13 = $258 | $245;
-    $$19 = $or$cond13 ? 3016 : ((3016 + 5|0));
-    $259 = $or$cond13&1;
-    $$20 = $259 ^ 1;
-    $298 = $196;$300 = $223;$a$0 = $$0$lcssa$i45;$fl$4 = $fl$1$;$p$2 = $p$0;$pl$1 = $$20;$prefix$1 = $$19;
-    label = 91;
-    break;
-   }
-   case 105: case 100:  {
-    $260 = ($223|0)<(0);
-    if ($260) {
-     $261 = (_i64Subtract(0,0,($196|0),($223|0))|0);
-     $262 = tempRet0;
-     $268 = $262;$270 = $261;$pl$0 = 1;$prefix$0 = 3016;
-     label = 86;
-     break L89;
-    }
-    $263 = $fl$1$ & 2048;
-    $264 = ($263|0)==(0);
-    if ($264) {
-     $265 = $fl$1$ & 1;
-     $266 = ($265|0)==(0);
-     $$ = $266 ? 3016 : ((3016 + 2|0));
-     $268 = $223;$270 = $196;$pl$0 = $265;$prefix$0 = $$;
-     label = 86;
-    } else {
-     $268 = $223;$270 = $196;$pl$0 = 1;$prefix$0 = ((3016 + 1|0));
-     label = 86;
-    }
-    break;
-   }
-   case 99:  {
-    $309 = $196&255;
-    HEAP8[$4>>0] = $309;
-    $1042 = $196;$1043 = $223;$a$2 = $4;$fl$6 = $194;$p$5 = 1;$pl$2 = 0;$prefix$2 = 3016;$z$2 = $2;
-    break;
-   }
-   case 109:  {
-    $310 = (___errno_location()|0);
-    $311 = HEAP32[$310>>2]|0;
-    $312 = (_strerror(($311|0))|0);
-    $a$1 = $312;
-    label = 96;
-    break;
-   }
-   case 115:  {
-    $313 = $196;
-    $314 = ($196|0)==(0);
-    $$15 = $314 ? 3032 : $313;
-    $a$1 = $$15;
-    label = 96;
-    break;
-   }
-   case 67:  {
-    HEAP32[$wc>>2] = $196;
-    HEAP32[$5>>2] = 0;
-    $1044 = $wc;$1045 = $6;$p$4264 = -1;
-    label = 101;
-    break;
-   }
-   case 83:  {
-    $321 = $196;
-    $322 = ($p$0|0)==(0);
-    if ($322) {
-     $1046 = $196;$1047 = $321;$i$0$lcssa265 = 0;
-     label = 106;
-    } else {
-     $1044 = $321;$1045 = $196;$p$4264 = $p$0;
-     label = 101;
-    }
-    break;
-   }
    case 65: case 71: case 70: case 69: case 97: case 103: case 102: case 101:  {
     HEAP32[tempDoublePtr>>2] = $196;HEAP32[tempDoublePtr+4>>2] = $223;$360 = +HEAPF64[tempDoublePtr>>3];
     HEAP32[$e2$i>>2] = 0;
@@ -14211,7 +14843,7 @@ function _printf_core($f,$fmt,$ap,$nl_arg,$nl_type) {
      $$pr151$i = $$pr$i;$a$1$lcssa$i = $$36$i;$z$1$lcssa$i = $565;
     }
     $594 = ($$pr151$i|0)<(0);
-    L237: do {
+    L222: do {
      if ($594) {
       $595 = (($$p$i) + 25)|0;
       $596 = (($595|0) / 9)&-1;
@@ -14279,7 +14911,7 @@ function _printf_core($f,$fmt,$ap,$nl_arg,$nl_type) {
          $601 = $618;$a$3244$us$i = $$a$3$us308$i;$z$3243$us$i = $$z$4$us$i;
         } else {
          $a$3$lcssa$i = $$a$3$us308$i;$z$3$lcssa$i = $$z$4$us$i;
-         break L237;
+         break L222;
         }
        }
       } else {
@@ -15149,6 +15781,20 @@ function _printf_core($f,$fmt,$ap,$nl_arg,$nl_type) {
    }
    case 110:  {
     switch ($st$0|0) {
+    case 0:  {
+     $195 = $196;
+     HEAP32[$195>>2] = $cnt$1;
+     $1034 = $196;$1035 = $223;$23 = $136;$cnt$0 = $cnt$1;$l$0 = $37;$l10n$0 = $l10n$3;
+     continue L1;
+     break;
+    }
+    case 1:  {
+     $197 = $196;
+     HEAP32[$197>>2] = $cnt$1;
+     $1034 = $196;$1035 = $223;$23 = $136;$cnt$0 = $cnt$1;$l$0 = $37;$l10n$0 = $l10n$3;
+     continue L1;
+     break;
+    }
     case 2:  {
      $198 = ($cnt$1|0)<(0);
      $199 = $198 << 31 >> 31;
@@ -15167,20 +15813,6 @@ function _printf_core($f,$fmt,$ap,$nl_arg,$nl_type) {
      $205 = $cnt$1&65535;
      $206 = $196;
      HEAP16[$206>>1] = $205;
-     $1034 = $196;$1035 = $223;$23 = $136;$cnt$0 = $cnt$1;$l$0 = $37;$l10n$0 = $l10n$3;
-     continue L1;
-     break;
-    }
-    case 0:  {
-     $195 = $196;
-     HEAP32[$195>>2] = $cnt$1;
-     $1034 = $196;$1035 = $223;$23 = $136;$cnt$0 = $cnt$1;$l$0 = $37;$l10n$0 = $l10n$3;
-     continue L1;
-     break;
-    }
-    case 1:  {
-     $197 = $196;
-     HEAP32[$197>>2] = $cnt$1;
      $1034 = $196;$1035 = $223;$23 = $136;$cnt$0 = $cnt$1;$l$0 = $37;$l10n$0 = $l10n$3;
      continue L1;
      break;
@@ -15232,6 +15864,112 @@ function _printf_core($f,$fmt,$ap,$nl_arg,$nl_type) {
    case 88: case 120:  {
     $fl$3 = $fl$1$;$p$1 = $p$0;$t$1 = $t$0;
     label = 75;
+    break;
+   }
+   case 111:  {
+    $243 = ($196|0)==(0);
+    $244 = ($223|0)==(0);
+    $245 = $243 & $244;
+    if ($245) {
+     $$0$lcssa$i45 = $2;
+    } else {
+     $$03$i42 = $2;$247 = $196;$251 = $223;
+     while(1) {
+      $246 = $247 & 7;
+      $248 = $246 | 48;
+      $249 = $248&255;
+      $250 = (($$03$i42) + -1|0);
+      HEAP8[$250>>0] = $249;
+      $252 = (_bitshift64Lshr(($247|0),($251|0),3)|0);
+      $253 = tempRet0;
+      $254 = ($252|0)==(0);
+      $255 = ($253|0)==(0);
+      $256 = $254 & $255;
+      if ($256) {
+       $$0$lcssa$i45 = $250;
+       break;
+      } else {
+       $$03$i42 = $250;$247 = $252;$251 = $253;
+      }
+     }
+    }
+    $257 = $fl$1$ & 8;
+    $258 = ($257|0)==(0);
+    $or$cond13 = $258 | $245;
+    $$19 = $or$cond13 ? 3016 : ((3016 + 5|0));
+    $259 = $or$cond13&1;
+    $$20 = $259 ^ 1;
+    $298 = $196;$300 = $223;$a$0 = $$0$lcssa$i45;$fl$4 = $fl$1$;$p$2 = $p$0;$pl$1 = $$20;$prefix$1 = $$19;
+    label = 91;
+    break;
+   }
+   case 105: case 100:  {
+    $260 = ($223|0)<(0);
+    if ($260) {
+     $261 = (_i64Subtract(0,0,($196|0),($223|0))|0);
+     $262 = tempRet0;
+     $268 = $262;$270 = $261;$pl$0 = 1;$prefix$0 = 3016;
+     label = 86;
+     break L89;
+    }
+    $263 = $fl$1$ & 2048;
+    $264 = ($263|0)==(0);
+    if ($264) {
+     $265 = $fl$1$ & 1;
+     $266 = ($265|0)==(0);
+     $$ = $266 ? 3016 : ((3016 + 2|0));
+     $268 = $223;$270 = $196;$pl$0 = $265;$prefix$0 = $$;
+     label = 86;
+    } else {
+     $268 = $223;$270 = $196;$pl$0 = 1;$prefix$0 = ((3016 + 1|0));
+     label = 86;
+    }
+    break;
+   }
+   case 117:  {
+    $268 = $223;$270 = $196;$pl$0 = 0;$prefix$0 = 3016;
+    label = 86;
+    break;
+   }
+   case 99:  {
+    $309 = $196&255;
+    HEAP8[$4>>0] = $309;
+    $1042 = $196;$1043 = $223;$a$2 = $4;$fl$6 = $194;$p$5 = 1;$pl$2 = 0;$prefix$2 = 3016;$z$2 = $2;
+    break;
+   }
+   case 109:  {
+    $310 = (___errno_location()|0);
+    $311 = HEAP32[$310>>2]|0;
+    $312 = (_strerror(($311|0))|0);
+    $a$1 = $312;
+    label = 96;
+    break;
+   }
+   case 115:  {
+    $313 = $196;
+    $314 = ($196|0)==(0);
+    $$15 = $314 ? 3032 : $313;
+    $a$1 = $$15;
+    label = 96;
+    break;
+   }
+   case 67:  {
+    HEAP32[$wc>>2] = $196;
+    HEAP32[$5>>2] = 0;
+    $1044 = $wc;$1045 = $6;$p$4264 = -1;
+    label = 101;
+    break;
+   }
+   case 83:  {
+    $321 = $196;
+    $322 = ($p$0|0)==(0);
+    if ($322) {
+     $1046 = $196;$1047 = $321;$i$0$lcssa265 = 0;
+     label = 106;
+    } else {
+     $1044 = $321;$1045 = $196;$p$4264 = $p$0;
+     label = 101;
+    }
     break;
    }
    default: {
