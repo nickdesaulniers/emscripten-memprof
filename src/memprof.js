@@ -37,6 +37,7 @@ MemProf.prototype.freeProxy = function (address) {
     throw new Error('free for which there was not a malloc', address,
       stackTrace);
   }
+  this.updateUI();
 };
 
 MemProf.prototype.constructUI = function () {
@@ -86,6 +87,7 @@ MemProf.prototype.fillLine = function (startBytes, endBytes) {
 };
 
 MemProf.prototype.updateUI = function () {
+  this.ctx.save();
   this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
   this.ctx.fillStyle = 'black';
@@ -96,7 +98,20 @@ MemProf.prototype.updateUI = function () {
 
   this.ctx.fillStyle = '#70FF70';
   this.fillLine(DYNAMIC_BASE, DYNAMICTOP);
-  //console.log(Module.stackTrace());
+
+  Object.keys(this.outstandingMallocs).sort().forEach(function (addr, i) {
+    addr = parseInt(addr, 10);
+    if (i % 3 === 0) {
+      this.ctx.fillStyle = 'red';
+    } else if (i % 3 === 1) {
+      this.ctx.fillStyle = 'orange';
+    } else {
+      this.ctx.fillStyle = 'yellow';
+    }
+    this.fillLine(addr, addr + this.outstandingMallocs[addr].size);
+  }.bind(this));
+
+  this.ctx.restore();
 };
 
 var memProf = new MemProf;
