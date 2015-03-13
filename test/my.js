@@ -7,7 +7,10 @@ var treemap = d3.layout.treemap()
 .size([w, h])
 .value(function(d) { return d.size; });
 
-var div = d3.select("#chart").append("div")
+var myDiv = document.createElement('div');
+document.body.appendChild(myDiv);
+
+var div = d3.select(myDiv).append("div")
 .style("position", "relative")
 .style("width", w + "px")
 .style("height", h + "px");
@@ -24,7 +27,7 @@ function update (json) {
   .call(cell)
   .text(function(d) { return d.children ? null : d.name; });
 
-  d.exit().transition().duration(500).remove();
+  d.exit().remove();
 };
 
 d3.json("flare.json", update);
