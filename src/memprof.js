@@ -104,7 +104,7 @@ MemProf.prototype.updateUI = function () {
     if (i % 3 === 0) {
       this.ctx.fillStyle = 'red';
     } else if (i % 3 === 1) {
-      this.ctx.fillStyle = 'orange';
+      this.ctx.fillStyle = 'blue';
     } else {
       this.ctx.fillStyle = 'yellow';
     }
@@ -112,6 +112,33 @@ MemProf.prototype.updateUI = function () {
   }.bind(this));
 
   this.ctx.restore();
+};
+
+MemProf.prototype.stackTraceHierarchy = function () {
+  var hier = {};
+  var re = /(.+)@.+:(\d+):.+/;
+
+  function group (par, list) {
+    var key = list.pop();
+    // fix up key!
+    var m = key.match(re);
+    // demangle is injected into global scope by emscripten
+    if (m && m.length === 3) key = demangle(m[1]) + '#' + m[2];
+    if (!(key in par)) {
+      par[key] = {};
+    }
+    if (!key.startsWith('_malloc') && list.length) group(par[key], list);
+  };
+
+  Object.keys(this.outstandingMallocs).forEach(function (addr) {
+    group(hier, this.outstandingMallocs[addr].stackTrace);
+  }.bind(this));
+
+  return hier;
+};
+
+MemProf.prototype.numOutstandingMallocs = function () {
+  return Object.keys(this.outstandingMallocs).length;
 };
 
 var memProf = new MemProf;
